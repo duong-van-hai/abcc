@@ -1,64 +1,160 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-    <meta charset="utf-8">
-    <title>AR Pokemon Hand</title>
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <meta charset="UTF-8">
+    <title>Simple Tank Game</title>
+    <style>
+        body { margin: 0; background: #333; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { background: #1a1a1a; border: 2px solid #555; display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; pointer-events: none; }
+    </style>
 </head>
-<body style="margin: 0; overflow: hidden;">
-    <video id="webcam" style="position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: -1; transform: scaleX(-1);" autoplay playsinline></video>
-
-    <a-scene embedded vr-mode-ui="enabled: false" renderer="alpha: true;">
-        <a-entity id="pokemon" visible="false">
-            <a-sphere radius="0.25" color="#FFFF00" position="0 0 0"></a-sphere>
-            <a-cone radius-bottom="0.05" height="0.3" color="#FFFF00" position="-0.15 0.25 0" rotation="0 0 20">
-                <a-sphere radius="0.02" color="#000" position="0 0.15 0"></a-sphere>
-            </a-cone>
-            <a-cone radius-bottom="0.05" height="0.3" color="#FFFF00" position="0.15 0.25 0" rotation="0 0 -20">
-                <a-sphere radius="0.02" color="#000" position="0 0.15 0"></a-sphere>
-            </a-cone>
-            <a-sphere radius="0.02" color="#000" position="-0.08 0.05 0.2"></a-sphere>
-            <a-sphere radius="0.02" color="#000" position="0.08 0.05 0.2"></a-sphere>
-            <a-sphere radius="0.04" color="#FF0000" position="-0.15 -0.05 0.18"></a-sphere>
-            <a-sphere radius="0.04" color="#FF0000" position="0.15 -0.05 0.18"></a-sphere>
-            <a-box width="0.05" height="0.3" depth="0.02" color="#FFFF00" position="0 0 -0.25" rotation="0 0 45"></a-box>
-        </a-entity>
-
-        <a-entity light="type: ambient; intensity: 1.5"></a-entity>
-        <a-entity camera position="0 1.6 0"></a-entity>
-    </a-scene>
+<body>
+    <div id="ui">
+        <h1>Điểm: <span id="score">0</span></h1>
+        <p>Di chuyển: WASD/Mũi tên | Bắn: Space</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
 
     <script>
-        const videoElement = document.getElementById('webcam');
-        const pokemon = document.getElementById('pokemon');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
 
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        canvas.width = 800;
+        canvas.height = 600;
+
+        let score = 0;
+        let gameOver = false;
+
+        // Đối tượng Xe tăng người chơi
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            size: 30,
+            color: '#4CAF50',
+            speed: 4,
+            angle: 0
+        };
+
+        const bullets = [];
+        const enemies = [];
+        const keys = {};
+
+        // Lắng nghe sự kiện bàn phím
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space') shoot();
         });
 
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        function shoot() {
+            bullets.push({
+                x: player.x,
+                y: player.y,
+                angle: player.angle,
+                speed: 7,
+                size: 5
+            });
+        }
 
-        hands.onResults((results) => {
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                pokemon.setAttribute('visible', 'true');
-                const palm = results.multiHandLandmarks[0][9]; // Lòng bàn tay
-                const x = (0.5 - palm.x) * 4;
-                const y = (0.5 - palm.y) * 3 + 1.5;
-                const z = -2 + (palm.z * 2);
-                pokemon.setAttribute('position', {x, y, z});
-                pokemon.setAttribute('rotation', `0 ${x * 40} 0`);
+        function spawnEnemy() {
+            const size = 30;
+            let x, y;
+            // Xuất hiện ngẫu nhiên ở các cạnh màn hình
+            if (Math.random() < 0.5) {
+                x = Math.random() < 0.5 ? 0 : canvas.width;
+                y = Math.random() * canvas.height;
             } else {
-                pokemon.setAttribute('visible', 'false');
+                x = Math.random() * canvas.width;
+                y = Math.random() < 0.5 ? 0 : canvas.height;
             }
-        });
+            enemies.push({ x, y, size, speed: 1.5, color: '#F44336' });
+        }
 
-        const camera = new Camera(videoElement, {
-            onFrame: async () => { await hands.send({image: videoElement}); },
-            width: 1280, height: 720
-        });
-        camera.start();
+        setInterval(spawnEnemy, 2000); // Mỗi 2 giây tạo 1 địch
+
+        function update() {
+            if (gameOver) return;
+
+            // Di chuyển người chơi
+            if (keys['ArrowUp'] || keys['KeyW']) { player.y -= player.speed; player.angle = -Math.PI/2; }
+            if (keys['ArrowDown'] || keys['KeyS']) { player.y += player.speed; player.angle = Math.PI/2; }
+            if (keys['ArrowLeft'] || keys['KeyA']) { player.x -= player.speed; player.angle = Math.PI; }
+            if (keys['ArrowRight'] || keys['KeyD']) { player.x += player.speed; player.angle = 0; }
+
+            // Cập nhật đạn
+            bullets.forEach((b, index) => {
+                b.x += Math.cos(b.angle) * b.speed;
+                b.y += Math.sin(b.angle) * b.speed;
+                if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+                    bullets.splice(index, 1);
+                }
+            });
+
+            // Cập nhật kẻ địch
+            enemies.forEach((en, enIdx) => {
+                // Địch đuổi theo người chơi
+                const dx = player.x - en.x;
+                const dy = player.y - en.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                en.x += (dx / dist) * en.speed;
+                en.y += (dy / dist) * en.speed;
+
+                // Kiểm tra va chạm với người chơi
+                if (dist < player.size) {
+                    gameOver = true;
+                    alert("Game Over! Điểm của bạn: " + score);
+                    location.reload();
+                }
+
+                // Kiểm tra va chạm với đạn
+                bullets.forEach((b, bIdx) => {
+                    const distBullet = Math.sqrt((b.x - en.x)**2 + (b.y - en.y)**2);
+                    if (distBullet < en.size) {
+                        enemies.splice(enIdx, 1);
+                        bullets.splice(bIdx, 1);
+                        score += 10;
+                        scoreElement.innerText = score;
+                    }
+                });
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Vẽ người chơi (Hình vuông đơn giản)
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+            
+            // Vẽ nòng súng
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(player.x + Math.cos(player.angle)*25, player.y + Math.sin(player.angle)*25);
+            ctx.stroke();
+
+            // Vẽ đạn
+            ctx.fillStyle = "yellow";
+            bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.size, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // Vẽ kẻ địch
+            ctx.fillStyle = "#F44336";
+            enemies.forEach(en => {
+                ctx.fillRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
+            });
+
+            update();
+            requestAnimationFrame(draw);
+        }
+
+        draw();
     </script>
 </body>
 </html>
