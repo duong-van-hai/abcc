@@ -1,160 +1,67 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Simple Tank Game</title>
-    <style>
-        body { margin: 0; background: #333; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: sans-serif; overflow: hidden; }
-        canvas { background: #1a1a1a; border: 2px solid #555; display: block; }
-        #ui { position: absolute; top: 20px; left: 20px; pointer-events: none; }
-    </style>
+  <meta charset="utf-8">
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <style>
+    body { margin: 0; display: flex; justify-content: center; background: #222; }
+    .container { position: relative; width: 1280px; height: 720px; }
+    #input_video { display: none; }
+    #output_canvas { width: 100%; height: auto; transform: rotateY(180deg); }
+  </style>
 </head>
+
 <body>
-    <div id="ui">
-        <h1>Điểm: <span id="score">0</span></h1>
-        <p>Di chuyển: WASD/Mũi tên | Bắn: Space</p>
-    </div>
-    <canvas id="gameCanvas"></canvas>
+  <div class="container">
+    <video id="input_video"></video>
+    <canvas id="output_canvas" width="1280px" height="720px"></canvas>
+  </div>
 
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const scoreElement = document.getElementById('score');
+  <script type="module">
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
 
-        canvas.width = 800;
-        canvas.height = 600;
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      
+      // Vẽ hình ảnh từ webcam
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        let score = 0;
-        let gameOver = false;
-
-        // Đối tượng Xe tăng người chơi
-        const player = {
-            x: canvas.width / 2,
-            y: canvas.height / 2,
-            size: 30,
-            color: '#4CAF50',
-            speed: 4,
-            angle: 0
-        };
-
-        const bullets = [];
-        const enemies = [];
-        const keys = {};
-
-        // Lắng nghe sự kiện bàn phím
-        window.addEventListener('keydown', e => keys[e.code] = true);
-        window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('keydown', e => {
-            if (e.code === 'Space') shoot();
-        });
-
-        function shoot() {
-            bullets.push({
-                x: player.x,
-                y: player.y,
-                angle: player.angle,
-                speed: 7,
-                size: 5
-            });
+      if (results.multiHandLandmarks) {
+        for (const landmarks of results.multiHandLandmarks) {
+          // Vẽ các điểm mốc và đường nối
+          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+          drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
         }
+      }
+      canvasCtx.restore();
+    }
 
-        function spawnEnemy() {
-            const size = 30;
-            let x, y;
-            // Xuất hiện ngẫu nhiên ở các cạnh màn hình
-            if (Math.random() < 0.5) {
-                x = Math.random() < 0.5 ? 0 : canvas.width;
-                y = Math.random() * canvas.height;
-            } else {
-                x = Math.random() * canvas.width;
-                y = Math.random() < 0.5 ? 0 : canvas.height;
-            }
-            enemies.push({ x, y, size, speed: 1.5, color: '#F44336' });
-        }
+    const hands = new Hands({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
 
-        setInterval(spawnEnemy, 2000); // Mỗi 2 giây tạo 1 địch
+    hands.setOptions({
+      maxNumHands: 2, // Nhận diện tối đa 2 bàn tay
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
 
-        function update() {
-            if (gameOver) return;
+    hands.onResults(onResults);
 
-            // Di chuyển người chơi
-            if (keys['ArrowUp'] || keys['KeyW']) { player.y -= player.speed; player.angle = -Math.PI/2; }
-            if (keys['ArrowDown'] || keys['KeyS']) { player.y += player.speed; player.angle = Math.PI/2; }
-            if (keys['ArrowLeft'] || keys['KeyA']) { player.x -= player.speed; player.angle = Math.PI; }
-            if (keys['ArrowRight'] || keys['KeyD']) { player.x += player.speed; player.angle = 0; }
-
-            // Cập nhật đạn
-            bullets.forEach((b, index) => {
-                b.x += Math.cos(b.angle) * b.speed;
-                b.y += Math.sin(b.angle) * b.speed;
-                if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
-                    bullets.splice(index, 1);
-                }
-            });
-
-            // Cập nhật kẻ địch
-            enemies.forEach((en, enIdx) => {
-                // Địch đuổi theo người chơi
-                const dx = player.x - en.x;
-                const dy = player.y - en.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                en.x += (dx / dist) * en.speed;
-                en.y += (dy / dist) * en.speed;
-
-                // Kiểm tra va chạm với người chơi
-                if (dist < player.size) {
-                    gameOver = true;
-                    alert("Game Over! Điểm của bạn: " + score);
-                    location.reload();
-                }
-
-                // Kiểm tra va chạm với đạn
-                bullets.forEach((b, bIdx) => {
-                    const distBullet = Math.sqrt((b.x - en.x)**2 + (b.y - en.y)**2);
-                    if (distBullet < en.size) {
-                        enemies.splice(enIdx, 1);
-                        bullets.splice(bIdx, 1);
-                        score += 10;
-                        scoreElement.innerText = score;
-                    }
-                });
-            });
-        }
-
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Vẽ người chơi (Hình vuông đơn giản)
-            ctx.fillStyle = player.color;
-            ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
-            
-            // Vẽ nòng súng
-            ctx.strokeStyle = "white";
-            ctx.lineWidth = 5;
-            ctx.beginPath();
-            ctx.moveTo(player.x, player.y);
-            ctx.lineTo(player.x + Math.cos(player.angle)*25, player.y + Math.sin(player.angle)*25);
-            ctx.stroke();
-
-            // Vẽ đạn
-            ctx.fillStyle = "yellow";
-            bullets.forEach(b => {
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, b.size, 0, Math.PI*2);
-                ctx.fill();
-            });
-
-            // Vẽ kẻ địch
-            ctx.fillStyle = "#F44336";
-            enemies.forEach(en => {
-                ctx.fillRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
-            });
-
-            update();
-            requestAnimationFrame(draw);
-        }
-
-        draw();
-    </script>
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({image: videoElement});
+      },
+      width: 1280,
+      height: 720
+    });
+    camera.start();
+  </script>
 </body>
 </html>
