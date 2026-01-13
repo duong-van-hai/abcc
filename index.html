@@ -1,67 +1,282 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-  <meta charset="utf-8">
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <style>
-    body { margin: 0; display: flex; justify-content: center; background: #222; }
-    .container { position: relative; width: 1280px; height: 720px; }
-    #input_video { display: none; }
-    #output_canvas { width: 100%; height: auto; transform: rotateY(180deg); }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timeline Pro - File Attach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #fcfcfd; color: #1a1a1a; }
+        .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); }
+        .note-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
 </head>
-
 <body>
-  <div class="container">
-    <video id="input_video"></video>
-    <canvas id="output_canvas" width="1280px" height="720px"></canvas>
-  </div>
+    <div id="root"></div>
 
-  <script type="module">
-    const videoElement = document.getElementById('input_video');
-    const canvasElement = document.getElementById('output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
 
-    function onResults(results) {
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      
-      // Vẽ hình ảnh từ webcam
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        const firebaseConfig = {
+            apiKey: "AIzaSyAV-XVaOyUiq1c-29VTaWjLKcEXrssnnTE",
+            authDomain: "qlhs10a7.firebaseapp.com",
+            projectId: "qlhs10a7",
+            storageBucket: "qlhs10a7.firebasestorage.app",
+            messagingSenderId: "584229565603",
+            appId: "1:584229565603:web:d47a10f0a512a1a309bb16",
+            measurementId: "G-8E5E1933DE"
+        };
 
-      if (results.multiHandLandmarks) {
-        for (const landmarks of results.multiHandLandmarks) {
-          // Vẽ các điểm mốc và đường nối
-          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-          drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+        const LABELS = [
+            { id: 'Đảng', color: 'bg-red-500', text: 'text-red-600', bg: 'bg-red-50' },
+            { id: 'Chuyên môn', color: 'bg-blue-500', text: 'text-blue-600', bg: 'bg-blue-50' },
+            { id: 'Gia đình', color: 'bg-pink-500', text: 'text-pink-600', bg: 'bg-pink-50' },
+            { id: 'Cá nhân', color: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50' }
+        ];
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const storage = firebase.storage();
+        const provider = new firebase.auth.GoogleAuthProvider();
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [notes, setNotes] = useState([]);
+            const [text, setText] = useState("");
+            const [file, setFile] = useState(null);
+            const [uploading, setUploading] = useState(false);
+            const [activeLabel, setActiveLabel] = useState("Cá nhân");
+            const [search, setSearch] = useState("");
+            const [filterLabel, setFilterLabel] = useState("");
+            const [loading, setLoading] = useState(true);
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                return auth.onAuthStateChanged((u) => { setUser(u); setLoading(false); });
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsubscribe = db.collection("notes")
+                    .where("userId", "==", user.uid)
+                    .onSnapshot((s) => {
+                        const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                        setNotes(data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+                    });
+                return () => unsubscribe();
+            }, [user]);
+
+            const filteredNotes = useMemo(() => {
+                return notes.filter(n => {
+                    const matchesSearch = n.content.toLowerCase().includes(search.toLowerCase());
+                    const matchesLabel = filterLabel ? n.label === filterLabel : true;
+                    return matchesSearch && matchesLabel;
+                });
+            }, [notes, search, filterLabel]);
+
+            const groupedNotes = useMemo(() => {
+                return filteredNotes.reduce((groups, note) => {
+                    const d = note.displayDate || "Khác";
+                    if (!groups[d]) groups[d] = [];
+                    groups[d].push(note);
+                    return groups;
+                }, {});
+            }, [filteredNotes]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if ((!text.trim() && !file) || !user) return;
+                
+                setUploading(true);
+                let fileUrl = null;
+                let fileName = null;
+
+                try {
+                    // Tải file lên Storage nếu có
+                    if (file) {
+                        const fileRef = storage.ref(`notes_files/${user.uid}/${Date.now()}_${file.name}`);
+                        await fileRef.put(file);
+                        fileUrl = await fileRef.getDownloadURL();
+                        fileName = file.name;
+                    }
+
+                    const now = new Date();
+                    const vnDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                    
+                    await db.collection("notes").add({
+                        content: text,
+                        userId: user.uid,
+                        label: activeLabel,
+                        displayDate: vnDate,
+                        fileUrl: fileUrl,
+                        fileName: fileName,
+                        time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    setText("");
+                    setFile(null);
+                } catch (err) {
+                    alert("Lỗi tải lên: " + err.message);
+                } finally {
+                    setUploading(false);
+                }
+            };
+
+            if (loading) return <div className="h-screen flex items-center justify-center font-medium text-gray-400 italic">Hệ thống đang khởi động...</div>;
+
+            if (!user) return (
+                <div className="h-screen flex items-center justify-center bg-white p-6">
+                    <button onClick={() => auth.signInWithPopup(provider)} className="flex items-center gap-3 px-8 py-4 bg-black text-white rounded-2xl font-semibold hover:opacity-80 transition-all shadow-xl">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 bg-white rounded-full p-0.5" />
+                        Đăng nhập bằng Google
+                    </button>
+                </div>
+            );
+
+            return (
+                <div className="max-w-5xl mx-auto flex flex-col lg:flex-row min-h-screen">
+                    {/* SIDEBAR */}
+                    <aside className="lg:w-64 w-full p-6 lg:fixed h-fit space-y-8 z-20">
+                        <div className="flex items-center gap-3 mb-10">
+                            <img src={user.photoURL} className="w-10 h-10 rounded-full shadow-sm" />
+                            <div className="flex flex-col">
+                                <span className="font-extrabold text-lg tracking-tight">Timeline</span>
+                                <button onClick={() => auth.signOut()} className="text-[10px] text-gray-400 text-left hover:text-red-500 font-bold uppercase tracking-widest">Đăng xuất</button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest mb-4 px-2">Phân loại</p>
+                            <button onClick={() => setFilterLabel("")} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all ${!filterLabel ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-gray-100'}`}>Tất cả ({notes.length})</button>
+                            {LABELS.map(l => (
+                                <button key={l.id} onClick={() => setFilterLabel(l.id)} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all ${filterLabel === l.id ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-100'}`}>
+                                    {l.id}
+                                </button>
+                            ))}
+                        </div>
+                    </aside>
+
+                    {/* MAIN FEED */}
+                    <main className="flex-1 lg:ml-64 p-4 lg:p-8 pb-48">
+                        <div className="max-w-2xl mx-auto space-y-12">
+                            {/* SEARCH BAR */}
+                            <div className="glass-header sticky top-4 p-2 rounded-[2rem] shadow-sm border border-gray-100 z-30">
+                                <input 
+                                    type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="Tìm kiếm nội dung..." 
+                                    className="w-full bg-transparent px-6 py-3 outline-none text-[16px] font-medium placeholder:text-gray-300"
+                                />
+                            </div>
+
+                            {/* TIMELINE LIST */}
+                            <div className="space-y-16">
+                                {Object.keys(groupedNotes).map(date => (
+                                    <div key={date} className="relative">
+                                        <div className="sticky top-24 z-10 py-2 mb-6 text-center">
+                                            <span className="text-[12px] font-extrabold text-gray-900 bg-gray-100 px-4 py-2 rounded-full shadow-sm">{date}</span>
+                                        </div>
+                                        <div className="space-y-6">
+                                            {groupedNotes[date].map(note => {
+                                                const labelInfo = LABELS.find(l => l.id === note.label) || LABELS[3];
+                                                return (
+                                                    <div key={note.id} className="note-card bg-white p-8 rounded-[2.5rem] shadow-[0_4px_20px_rgba(0,0,0,0.02)] border border-gray-50 group relative">
+                                                        <div className="flex justify-between items-center mb-6">
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="text-[11px] font-bold text-gray-300 uppercase">{note.time}</span>
+                                                                <span className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-tight ${labelInfo.bg} ${labelInfo.text}`}>
+                                                                    {note.label || 'Cá nhân'}
+                                                                </span>
+                                                            </div>
+                                                            <button onClick={() => confirm('Xóa ghi chú này?') && db.collection("notes").doc(note.id).delete()} className="opacity-0 group-hover:opacity-100 text-gray-200 hover:text-red-500 transition-all p-2 rounded-full hover:bg-red-50">
+                                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-[17px] leading-[1.6] text-gray-800 font-normal whitespace-pre-wrap">{note.content}</p>
+                                                        
+                                                        {/* HIỂN THỊ FILE ĐÍNH KÈM NẾU CÓ */}
+                                                        {note.fileUrl && (
+                                                            <div className="mt-6 p-4 bg-slate-50 rounded-2xl flex items-center justify-between">
+                                                                <div className="flex items-center gap-3 truncate">
+                                                                    <div className="bg-white p-2 rounded-xl shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-blue-500"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m.75 12l3 3m0 0l3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg></div>
+                                                                    <span className="text-xs font-bold text-gray-500 truncate">{note.fileName}</span>
+                                                                </div>
+                                                                <a href={note.fileUrl} target="_blank" className="text-[10px] font-extrabold uppercase bg-white px-4 py-2 rounded-xl shadow-sm text-blue-600 hover:bg-blue-600 hover:text-white transition-all">Tải về</a>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* INPUT AREA */}
+                    <div className="fixed bottom-0 left-0 right-0 p-6 glass-header z-40 border-t border-gray-50">
+                        <div className="max-w-2xl mx-auto flex flex-col gap-4">
+                            <div className="flex gap-2 overflow-x-auto hide-scrollbar justify-center">
+                                {LABELS.map(l => (
+                                    <button 
+                                        key={l.id} onClick={() => setActiveLabel(l.id)} 
+                                        className={`px-5 py-2 rounded-full text-[11px] font-bold transition-all border ${activeLabel === l.id ? 'bg-black text-white border-black shadow-lg scale-105' : 'bg-white text-gray-400 border-gray-100 hover:border-gray-300'}`}
+                                    >
+                                        {l.id}
+                                    </button>
+                                ))}
+                            </div>
+                            
+                            <form onSubmit={handleSubmit} className="relative bg-white shadow-xl rounded-[2rem] p-1.5 border border-gray-100">
+                                <div className="flex flex-col">
+                                    <textarea 
+                                        value={text} onChange={(e) => setText(e.target.value)} 
+                                        placeholder={uploading ? "Đang đẩy file lên Cloud..." : `Viết ghi chú ${activeLabel}...`}
+                                        className="w-full p-5 px-6 outline-none resize-none bg-transparent text-[16px] max-h-40" 
+                                        rows="1" 
+                                        disabled={uploading}
+                                    />
+                                    <div className="flex items-center justify-between p-2">
+                                        <div className="flex items-center gap-2">
+                                            {/* NÚT GHIM FILE */}
+                                            <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => setFile(e.target.files[0])} />
+                                            <button type="button" onClick={() => fileInputRef.current.click()} className="p-3 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-all">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" /></svg>
+                                            </button>
+                                            {file && (
+                                                <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full flex items-center gap-2">
+                                                    {file.name} 
+                                                    <button type="button" onClick={() => setFile(null)} className="hover:text-red-500">×</button>
+                                                </span>
+                                            )}
+                                        </div>
+                                        
+                                        <button disabled={uploading} className={`w-12 h-12 rounded-full flex items-center justify-center text-white transition-all shadow-lg active:scale-95 ${uploading ? 'bg-gray-200' : LABELS.find(l => l.id === activeLabel).color}`}>
+                                            {uploading ? <div className="loading-spinner"></div> : <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>}
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            );
         }
-      }
-      canvasCtx.restore();
-    }
 
-    const hands = new Hands({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-
-    hands.setOptions({
-      maxNumHands: 2, // Nhận diện tối đa 2 bàn tay
-      modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    hands.onResults(onResults);
-
-    const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({image: videoElement});
-      },
-      width: 1280,
-      height: 720
-    });
-    camera.start();
-  </script>
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
